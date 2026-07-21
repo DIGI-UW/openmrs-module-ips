@@ -1,103 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <module configVersion="1.2">
-	
+
 	<!-- Base Module Properties -->
 	<id>${project.parent.artifactId}</id>
 	<name>${project.parent.name}</name>
 	<version>${project.parent.version}</version>
 	<package>org.openmrs.module.ips</package>
-	<author>I-TECH DIGI</author>
+	<author>DIGI</author>
 	<description>
-			${project.parent.description}
+		${project.parent.description}
 	</description>
 
 	<activator>org.openmrs.module.ips.InternationalPatientSummaryActivator</activator>
-	
-	<!-- <updateURL>https://modules.openmrs.org/modules/download/@MODULE_ID@/update.rdf</updateURL> -->
-	<!-- /Base Module Properties -->
-	
-	<require_version>2.6.0</require_version>
+
+	<require_version>2.0.5</require_version>
 
 	<aware_of_modules>
 		<aware_of_module>org.openmrs.module.legacyui</aware_of_module>
 	</aware_of_modules>
-	<require_modules>
-		<require_module version="${webservices.restVersion}">
-			org.openmrs.module.webservices.rest
-		</require_module>
-	</require_modules>
-	
-	<!-- AOP
-	<advice>
-		<point>org.openmrs.api.FormService</point>
-		<class>@MODULE_PACKAGE@.advice.DuplicateFormAdvisor</class>
-	</advice>
-	 /AOP -->
-	
-	
-	<!-- Required Privileges 
-	<privilege>
-		<name>Form Entry</name>
-		<description>Allows user to access Form Entry pages/functions</description>
-	</privilege>
-	 /Required Privileges -->
 
+	<!-- Base URL of the SHR IPS mediator; /Patient/isanteplus/<id> is appended at fetch time. -->
+	<globalProperty>
+		<property>ips.url</property>
+		<defaultValue>https://openhimcore.sedishtest.live/SHR/ips</defaultValue>
+		<description>Base URL of the SHR IPS mediator that returns the consolidated IPS bundle.</description>
+	</globalProperty>
 
-	<!-- Required Global Properties-->
+	<!-- Complex concept the fetched IPS bundle is stored against (must be datatype Complex). -->
 	<globalProperty>
-		<property>@MODULE_ID@.concept</property>
-		<defaultValue>11557d80-af43-4788-b30c-69bc60489814</defaultValue>
-		<description>
-			UUID for the InternationalPatientSummary concept.
-		</description>
+		<property>ips.concept</property>
+		<defaultValue></defaultValue>
+		<description>UUID of the complex concept used to store the fetched IPS bundle.</description>
 	</globalProperty>
-	<globalProperty>
-		<property>@MODULE_ID@.url</property>
-		<defaultValue>https://hapi.fhir.org/baseR4/Patient/$summary</defaultValue>
-		<description>
-			Url for the InternationalPatientSummary.
-		</description>
-	</globalProperty>
-	<globalProperty>
-		<property>@MODULE_ID@.identifiertype.uuid</property>
-		<defaultValue>8d79403a-c2cc-11de-8d13-0010c6dffd0f</defaultValue>
-		<description>
-			Preferred UUID to query the IPS remote server.
-		</description>
-	</globalProperty>
-	
-	
-	<!--
-	<dwr>
-		<allow>
-			<create creator="new" javascript="DWRFormEntryService">
-				<param name="class" value="org.openmrs.module.@MODULE_ID@.web.DWRFormEntryService"/>
-				<include method="enterForm"/>
-			</create>
-		</allow>
 
-		<signatures>
-			<![CDATA[
-			import @MODULE_PACKAGE@.web.DWRFormEntryService;
-			DWRFormEntryService.enterForm(Integer patientId, Integer formId, boolean useEncounter, List<String> fields);
-			]]>
-		</signatures>	
-	</dwr>
-	-->
-	
-	<!-- Servlets -->
-	<!-- Accessed through the url /pageContext()/moduleServlet/<moduleId>/<servlet-name> 
-	<servlet>
-		<servlet-name>formDownload</servlet-name>
-		<servlet-class>@MODULE_PACKAGE@.web.FormDownloadServlet</servlet-class>
-	</servlet>
-	-->
-	<!-- /Servlets -->
-	
-	
+	<globalProperty>
+		<property>ips.identifierType</property>
+		<defaultValue>iSantePlus ID</defaultValue>
+		<description>Name or UUID of the patient identifier type whose value is sent to the mediator.</description>
+	</globalProperty>
+
+	<globalProperty>
+		<property>ips.username</property>
+		<defaultValue></defaultValue>
+		<description>Basic-auth username for the OpenHIM channel (blank = no auth header).</description>
+	</globalProperty>
+
+	<globalProperty>
+		<property>ips.password</property>
+		<defaultValue></defaultValue>
+		<description>Basic-auth password for the OpenHIM channel (blank = no auth header).</description>
+	</globalProperty>
+
 	<!-- Internationalization -->
-	<!-- All message codes should start with @MODULE_ID@.* -->
 	<messages>
 		<lang>en</lang>
 		<file>messages.properties</file>
@@ -110,6 +65,5 @@
 		<lang>es</lang>
 		<file>messages_es.properties</file>
 	</messages>
-	<!-- /Internationalization -->
-	
+
 </module>

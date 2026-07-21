@@ -17,7 +17,7 @@ To set up the IPS module, you need to configure the following global properties 
 | Property                      | Description                                                                                     |
 |-------------------------------|-------------------------------------------------------------------------------------------------|
 | `ips.url`                     | The URL of the FHIR server endpoint that returns the IPS.                                      |
-|                               | *Example*: `https://hapi.fhir.org/baseR4/Patient/{id}/$summary`                                   |
+|                               | *Example*: `https://hapi.fhir.org/baseR4/Patient/$summary`                                   |
 | `ips.concept`                 | The concept mapping or UUID of the complex concept used to store the IPS.                     |
 | `ips.identifierType.uuid`     | The UUID of the identifier type used to query the server for the IPS.                          |
 
