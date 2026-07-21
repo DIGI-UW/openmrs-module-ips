@@ -11,7 +11,7 @@
 
 	<groupId>org.openmrs.module</groupId>
 	<artifactId>ips</artifactId>
-	<version>1.0.0</version>
+	<version>1.0.0-SNAPSHOT</version>
 	<packaging>pom</packaging>
 	<name>International Patient Summary</name>
 	<description>Lightweight module that pulls a consolidated FHIR IPS from the SHR mediator, stores it, and renders it for the legacy UI (OpenMRS Platform 2.0.x)</description>

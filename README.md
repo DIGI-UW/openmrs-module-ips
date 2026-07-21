@@ -1,6 +1,6 @@
 # International Patient Summary Module
 
-> **⚠️ Branch `2.0.x` — legacy OpenMRS Platform 1.x/2.0.x variant.**
+> **⚠️ Branch `1.x` — legacy OpenMRS Platform 1.x/2.0.x variant.**
 > This is a dependency-light backport for old OpenMRS platforms (e.g. iSantePlus, Platform 2.0.5).
 > It is **not** the modern module — for OpenMRS Platform 2.6.0+ use `develop`/`main`.
 >
@@ -31,7 +31,7 @@ To set up the IPS module, configure the following global properties in your Open
 | `ips.username`       | Basic-auth username for the IPS source / OpenHIM channel (blank = no auth header).                             |
 | `ips.password`       | Basic-auth password for the IPS source / OpenHIM channel (blank = no auth header).                            |
 
-> Note: this `2.0.x` (legacy) branch differs from the modern module — it uses `ips.identifierType`
+> Note: this `1.x` (legacy) branch differs from the modern module — it uses `ips.identifierType`
 > (name or UUID), not `ips.identifierType.uuid`, and adds `ips.username` / `ips.password` for a
 > Basic-auth-protected source. The `ips.url` is an SHR/OpenHIM IPS mediator, not a FHIR `$summary` endpoint.
 
