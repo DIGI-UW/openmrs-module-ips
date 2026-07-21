@@ -21,28 +21,35 @@ The **International Patient Summary** (IPS) module provides functionality for fe
 
 ## Configuration
 
-To set up the IPS module, you need to configure the following global properties in your OpenMRS instance:
+To set up the IPS module, configure the following global properties in your OpenMRS instance:
 
-| Property                      | Description                                                                                     |
-|-------------------------------|-------------------------------------------------------------------------------------------------|
-| `ips.url`                     | The URL of the FHIR server endpoint that returns the IPS.                                      |
-|                               | *Example*: `https://hapi.fhir.org/baseR4/Patient/$summary`                                   |
-| `ips.concept`                 | The concept mapping or UUID of the complex concept used to store the IPS.                     |
-| `ips.identifierType.uuid`     | The UUID of the identifier type used to query the server for the IPS.                          |
+| Property             | Description                                                                                                   |
+|----------------------|---------------------------------------------------------------------------------------------------------------|
+| `ips.url`            | Base URL of the IPS source that returns the consolidated IPS bundle (e.g. an SHR / OpenHIM IPS mediator). The per-patient path (`/Patient/<identifierType>/<id>`) is appended at fetch time. |
+| `ips.concept`        | UUID of the **complex** concept used to store the fetched IPS bundle.                                          |
+| `ips.identifierType` | Name **or** UUID of the patient identifier type whose value is sent to the IPS source (e.g. `iSantePlus ID`). |
+| `ips.username`       | Basic-auth username for the IPS source / OpenHIM channel (blank = no auth header).                             |
+| `ips.password`       | Basic-auth password for the IPS source / OpenHIM channel (blank = no auth header).                            |
+
+> Note: this `2.0.x` (legacy) branch differs from the modern module — it uses `ips.identifierType`
+> (name or UUID), not `ips.identifierType.uuid`, and adds `ips.username` / `ips.password` for a
+> Basic-auth-protected source. The `ips.url` is an SHR/OpenHIM IPS mediator, not a FHIR `$summary` endpoint.
 
 ### Example Configuration
 
 ```plaintext
-ips.url = https://hapi.fhir.org/baseR4/Patient/$summary
-ips.concept = <UUID or concept mapping>
-ips.identifierType.uuid = <UUID>
+ips.url            = https://<openhim-host>/SHR/ips
+ips.concept        = <UUID of a complex concept>
+ips.identifierType = iSantePlus ID
+ips.username       = <mediator client id>   # optional
+ips.password       = <mediator client secret> # optional
 ```
 
 ### Usage
-Once configured, the module will automatically handle the interaction with the specified FHIR server. Ensure that the properties are correctly set to facilitate proper communication and data handling.
+Once configured, the module fetches the consolidated IPS from `ips.url`, stores it against the complex `ips.concept`, and retrieves it on demand. Ensure the properties are set correctly for proper communication and data handling.
 
 ### UI
-The OpenMRS 3.x has a frontend ESM to view the IPS. See [here](https://github.com/I-TECH-UW/openmrs-esm-ips)
+This legacy branch renders the IPS **server-side** (bilingual FR/EN HTML) for the OpenMRS legacy web UI (the registrationapp Continuity-of-Care fragment) — there is no O3 ESM frontend on these platforms. For OpenMRS 3.x, use the modern module (`develop`/`main`) with the frontend ESM: https://github.com/I-TECH-UW/openmrs-esm-ips
 
 ### Contributing
 Contributions to enhance the IPS module are welcome! Please follow the standard OpenMRS contribution guidelines for submitting issues and pull requests.
