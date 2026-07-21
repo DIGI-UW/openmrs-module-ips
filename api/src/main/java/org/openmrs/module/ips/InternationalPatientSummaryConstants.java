@@ -10,16 +10,34 @@
 package org.openmrs.module.ips;
 
 /**
- * Constants class for InternationalPatientSummary.
+ * Global-property keys for the International Patient Summary module.
  */
 public final class InternationalPatientSummaryConstants {
-	
-	protected InternationalPatientSummaryConstants() {
+
+	private InternationalPatientSummaryConstants() {
 	}
-	
-	public static final String IPS_URL_STRING = "ips.url";
-	
+
+	/**
+	 * Base URL of the SHR IPS mediator, e.g.
+	 * {@code https://openhimcore.sedishtest.live/SHR/ips}. The patient's iSantePlus ID is appended as
+	 * {@code /Patient/isanteplus/<id>} at fetch time.
+	 */
+	public static final String IPS_URL = "ips.url";
+
+	/** UUID of the complex concept the fetched IPS bundle is stored against. */
 	public static final String IPS_CONCEPT = "ips.concept";
-	
-	public static final String IPS_PREFERRED_IDENTIFIER_TYPE_UUID = "ips.identifiertype.uuid";
+
+	/**
+	 * Name (or UUID) of the patient identifier type whose value is sent to the mediator. Defaults to
+	 * "iSantePlus ID".
+	 */
+	public static final String IPS_IDENTIFIER_TYPE = "ips.identifierType";
+
+	/** Basic-auth username for the OpenHIM channel (blank = no auth header). */
+	public static final String IPS_USERNAME = "ips.username";
+
+	/** Basic-auth password for the OpenHIM channel (blank = no auth header). */
+	public static final String IPS_PASSWORD = "ips.password";
+
+	public static final String DEFAULT_IDENTIFIER_TYPE = "iSantePlus ID";
 }
