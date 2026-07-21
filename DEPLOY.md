@@ -9,7 +9,7 @@ existing **Continuité des Soins → Importer** button.
 
 | artifact | where |
 |---|---|
-| `ips-1.0.0.omod` | github.com/mherman22/openmrs-module-ips release `ips-1.0.0` |
+| `ips` omod | build from **`DIGI-UW/openmrs-module-ips` branch `2.0.x`** (`git checkout 2.0.x && mvn -DskipTests clean package`, JDK 8); the omod is `omod/target/ips-*.omod` |
 | repointed `registrationapp` omod | build from charess-org/iSantePlus branch `feat/ips-module-migration` (needs GitHub-Packages access for the iSantePlus private deps, e.g. `m2sys-biometrics-api`) — same build env used for the other iSantePlus omods |
 
 The `registrationapp` change is only two controllers + poms + `config.xml` (Importer now calls
