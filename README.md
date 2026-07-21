@@ -1,5 +1,14 @@
 # International Patient Summary Module
 
+> **⚠️ Branch `2.0.x` — legacy OpenMRS Platform 1.x/2.0.x variant.**
+> This is a dependency-light backport for old OpenMRS platforms (e.g. iSantePlus, Platform 2.0.5).
+> It is **not** the modern module — for OpenMRS Platform 2.6.0+ use `develop`/`main`.
+>
+> Differences from `develop`: Platform **2.0.5**; **Jackson only** (no HAPI FHIR / Groovy / XDS.b);
+> no REST controller / O3 ESM frontend — instead a **server-side HTML renderer** (`render/IpsHtmlRenderer`)
+> for the legacy registrationapp GSP UI. Mechanism (fetch → store as complex obs → retrieve) mirrors the
+> modern module. See `DEPLOY.md` for setup.
+
 ## Overview
 
 The **International Patient Summary** (IPS) module provides functionality for fetching, storing, and retrieving FHIR International Patient Summaries within the OpenMRS ecosystem. This module is designed to operate in a headless manner, meaning it does not include any user interface components.

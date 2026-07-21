@@ -20,11 +20,13 @@
 		<aware_of_module>org.openmrs.module.legacyui</aware_of_module>
 	</aware_of_modules>
 
-	<!-- Base URL of the SHR IPS mediator; /Patient/isanteplus/<id> is appended at fetch time. -->
+	<!-- Base URL of the IPS source (e.g. an SHR / OpenHIM IPS mediator or a FHIR $summary endpoint).
+	     The per-patient path (/Patient/<identifierType>/<id>) is appended at fetch time.
+	     No default: configure per deployment. -->
 	<globalProperty>
 		<property>ips.url</property>
-		<defaultValue>https://openhimcore.sedishtest.live/SHR/ips</defaultValue>
-		<description>Base URL of the SHR IPS mediator that returns the consolidated IPS bundle.</description>
+		<defaultValue></defaultValue>
+		<description>Base URL of the IPS source that returns the consolidated IPS bundle (e.g. an SHR/OpenHIM IPS mediator). Configure per deployment.</description>
 	</globalProperty>
 
 	<!-- Complex concept the fetched IPS bundle is stored against (must be datatype Complex). -->
@@ -36,8 +38,8 @@
 
 	<globalProperty>
 		<property>ips.identifierType</property>
-		<defaultValue>iSantePlus ID</defaultValue>
-		<description>Name or UUID of the patient identifier type whose value is sent to the mediator.</description>
+		<defaultValue></defaultValue>
+		<description>Name or UUID of the patient identifier type whose value is sent to the IPS source. Configure per deployment (e.g. "iSantePlus ID" or "OpenMRS Identification Number").</description>
 	</globalProperty>
 
 	<globalProperty>
