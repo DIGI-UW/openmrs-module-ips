@@ -122,12 +122,12 @@ public class IpsHtmlRenderer {
 				resources.addAll(byType.get(t));
 			}
 		}
+		// Omit sections with no data entirely rather than rendering a header + "No data available".
+		if (resources.isEmpty()) {
+			return "";
+		}
 		StringBuilder sb = new StringBuilder();
 		sb.append("<h3>").append(frTitle).append(" <span class=\"en\">/ ").append(enTitle).append("</span></h3>");
-		if (resources.isEmpty()) {
-			sb.append("<p class=\"ips-pending\">Aucune donnée disponible <span class=\"en\">/ No data available</span></p>");
-			return sb.toString();
-		}
 		sb.append("<div class=\"table-wrap\"><table class=\"ips-table\"><thead><tr>");
 		for (String c : columns) {
 			sb.append("<th>").append(c).append("</th>");
