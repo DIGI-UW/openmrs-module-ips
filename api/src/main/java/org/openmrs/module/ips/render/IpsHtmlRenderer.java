@@ -10,9 +10,14 @@
 package org.openmrs.module.ips.render;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,13 +26,14 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Renders a FHIR IPS {@code Bundle} JSON string into a self-contained, bilingual (FR/EN) HTML
- * fragment for the legacy UI.
+ * fragment for the legacy UI. No HAPI/Groovy — the bundle is walked with Jackson.
  *
  * <p>
- * The layout mirrors the OpenMRS 3.x IPS ESM (DIGI-UW/openmrs-esm-ips): per-section structured
- * columns and colored status tags (red = critical/active/severe, green = completed/normal,
- * blue = other), so the legacy render matches how the IPS shows in O3. No HAPI/Groovy — the bundle
- * is walked with Jackson.
+ * The bundle aggregates data from several facilities (cross-facility golden-record summary), so
+ * every clinical row shows its facility of origin (the {@code mspp-site} meta tag). Technical
+ * noise is filtered out (registration/visit-container encounters, source-key and UUID
+ * identifiers, raw category codes, nominal status pills), dates render as DD/MM/YYYY, rows sort
+ * newest-first, and date-valued observations, medication reasons and humanized dosages are shown.
  * </p>
  */
 public class IpsHtmlRenderer {
@@ -36,7 +42,13 @@ public class IpsHtmlRenderer {
 
 	private static final String DASH = "--";
 
+	private static final String MSPP_SITE_TAG_SYSTEM = "mspp-site";
+
+	private static final Pattern UUID_VALUE = Pattern
+	        .compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
 	public String render(String bundleJson) {
+
 		StringBuilder sb = new StringBuilder();
 		sb.append(styleBlock());
 		sb.append("<div class=\"ips-card\">");
@@ -59,6 +71,7 @@ public class IpsHtmlRenderer {
 		}
 
 		Map<String, List<JsonNode>> byType = new LinkedHashMap<String, List<JsonNode>>();
+		Set<String> sites = new LinkedHashSet<String>();
 		JsonNode entries = bundle.path("entry");
 		if (entries.isArray()) {
 			for (JsonNode entry : entries) {
@@ -71,61 +84,203 @@ public class IpsHtmlRenderer {
 					byType.put(type, new ArrayList<JsonNode>());
 				}
 				byType.get(type).add(r);
+				String site = siteOf(r);
+				if (!site.isEmpty()) {
+					sites.add(site);
+				}
 			}
 		}
 
 		sb.append(title());
-		sb.append(header(byType.get("Patient")));
+		sb.append(header(byType.get("Patient"), sites));
 
-		sb.append(section("Allergies et intolérances", "Allergies &amp; Intolerances", byType,
-		    new String[] { "AllergyIntolerance" },
-		    new String[] { "Catégorie / Category", "Criticité / Criticality", "Description" }, Kind.ALLERGY));
-		sb.append(section("Problèmes", "Problems", byType,
-		    new String[] { "Condition" },
-		    new String[] { "Nom / Name", "Statut clinique / Clinical Status", "Sévérité / Severity", "Catégorie / Category" },
-		    Kind.CONDITION));
-		sb.append(section("Médicaments", "Medications", byType,
-		    new String[] { "MedicationStatement", "MedicationRequest" },
-		    new String[] { "Médicament / Medication", "Voie / Route", "Posologie / Dosage", "Statut / Status", "Date" },
-		    Kind.MEDICATION));
-		sb.append(section("Vaccinations", "Immunizations", byType,
-		    new String[] { "Immunization" },
-		    new String[] { "Date", "Statut / Status", "Vaccin / Vaccine", "Voie / Route" }, Kind.IMMUNIZATION));
-		sb.append(section("Résultats et observations", "Results &amp; Observations", byType,
-		    new String[] { "Observation" },
-		    new String[] { "Nom / Name", "Date", "Valeur / Value", "Catégorie / Category" }, Kind.OBSERVATION));
-		sb.append(section("Actes", "Procedures", byType,
-		    new String[] { "Procedure" },
-		    new String[] { "Acte / Procedure", "Statut / Status", "Date" }, Kind.PROCEDURE));
-		sb.append(section("Comptes rendus", "Diagnostic Reports", byType,
-		    new String[] { "DiagnosticReport" },
-		    new String[] { "Compte rendu / Report", "Statut / Status", "Date" }, Kind.DIAGNOSTIC));
-		sb.append(section("Consultations", "Encounters", byType,
-		    new String[] { "Encounter" },
-		    new String[] { "Type", "Statut / Status", "Date" }, Kind.ENCOUNTER));
+		sb.append(section("Allergies et intolérances", "Allergies &amp; Intolerances",
+		    new String[] { "Description", "Criticité / Criticality", "Site" },
+		    allergyRows(resources(byType, "AllergyIntolerance"))));
+		sb.append(section("Problèmes", "Problems",
+		    new String[] { "Nom / Name", "Statut clinique / Clinical Status", "Sévérité / Severity", "Site" },
+		    conditionRows(resources(byType, "Condition"))));
+		sb.append(section("Médicaments", "Medications",
+		    new String[] { "Médicament / Medication", "Posologie / Dosage", "Motif / Reason", "Statut / Status", "Date",
+		            "Site" },
+		    medicationRows(resources(byType, "MedicationStatement", "MedicationRequest"))));
+		sb.append(section("Vaccinations", "Immunizations",
+		    new String[] { "Vaccin / Vaccine", "Date", "Statut / Status", "Site" },
+		    immunizationRows(resources(byType, "Immunization"))));
+		sb.append(section("Résultats et observations", "Results &amp; Observations",
+		    new String[] { "Nom / Name", "Valeur / Value", "Date", "Site" },
+		    observationRows(resources(byType, "Observation"))));
+		sb.append(section("Actes", "Procedures",
+		    new String[] { "Acte / Procedure", "Statut / Status", "Date", "Site" },
+		    procedureRows(resources(byType, "Procedure"))));
+		sb.append(section("Comptes rendus", "Diagnostic Reports",
+		    new String[] { "Compte rendu / Report", "Statut / Status", "Date", "Site" },
+		    diagnosticRows(resources(byType, "DiagnosticReport"))));
+		sb.append(section("Consultations", "Encounters",
+		    new String[] { "Type", "Statut / Status", "Date", "Site" },
+		    encounterRows(resources(byType, "Encounter"))));
 
 		sb.append("</div>");
+
 		return sb.toString();
 	}
 
-	private enum Kind {
-		ALLERGY, CONDITION, MEDICATION, IMMUNIZATION, OBSERVATION, PROCEDURE, DIAGNOSTIC, ENCOUNTER
+	// --- rows ------------------------------------------------------------------------------------
+
+	/** One rendered table row: HTML-ready cells plus the raw ISO date used for newest-first sorting. */
+	private static final class Row {
+
+		final String[] cells;
+
+		final String sortDate;
+
+		Row(String sortDate, String... cells) {
+			this.sortDate = sortDate == null ? "" : sortDate;
+			this.cells = cells;
+		}
+	}
+
+	private List<JsonNode> resources(Map<String, List<JsonNode>> byType, String... types) {
+		List<JsonNode> out = new ArrayList<JsonNode>();
+		for (String t : types) {
+			if (byType.containsKey(t)) {
+				out.addAll(byType.get(t));
+			}
+		}
+		return out;
+	}
+
+	private List<Row> allergyRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String crit = r.path("criticality").asText("");
+			String critCell = crit.isEmpty() ? DASH
+			        : tag(crit, crit.equalsIgnoreCase("high") ? "red" : crit.equalsIgnoreCase("low") ? "green" : "blue");
+			rows.add(new Row(r.path("recordedDate").asText(""), txt(codeable(r.path("code"))), critCell, siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> conditionRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String clin = codingCode(r.path("clinicalStatus"));
+			String sev = codeable(r.path("severity"));
+			String clinCell = clin.isEmpty() ? DASH : tag(clin, clin.toLowerCase().contains("active") ? "red" : "green");
+			String sevCell = sev.isEmpty() ? DASH : tag(sev, sev.toLowerCase().contains("severe") ? "red" : "blue");
+			rows.add(new Row(firstNonEmpty(r.path("onsetDateTime").asText(""), r.path("recordedDate").asText("")),
+			        txt(codeable(r.path("code"))), clinCell, sevCell, siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> medicationRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String date = firstNonEmpty(r.path("effectiveDateTime").asText(""),
+			    r.path("effectivePeriod").path("start").asText(""), r.path("authoredOn").asText(""));
+			String status = r.path("status").asText("");
+			// medications always show their status — "active" is clinically significant
+			String statusCell = status.isEmpty() ? DASH
+			        : tag(status, status.equalsIgnoreCase("active") || status.equalsIgnoreCase("completed") ? "green"
+			                : "blue");
+			rows.add(new Row(date, txt(codeable(bestNode(r, "medicationCodeableConcept", "medication"))),
+			        txt(dosageSummary(r)), txt(reason(r)), statusCell, txt(dateFr(date)), siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> immunizationRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String date = r.path("occurrenceDateTime").asText("");
+			rows.add(new Row(date, txt(codeable(r.path("vaccineCode"))), txt(dateFr(date)),
+			        statusCell(r.path("status").asText(""), "completed"), siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> observationRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String date = firstNonEmpty(r.path("effectiveDateTime").asText(""),
+			    r.path("effectivePeriod").path("start").asText(""), r.path("issued").asText(""));
+			rows.add(new Row(date, txt(codeable(r.path("code"))), txt(observationValue(r)), txt(dateFr(date)),
+			        siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> procedureRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String date = firstNonEmpty(r.path("performedDateTime").asText(""),
+			    r.path("performedPeriod").path("start").asText(""));
+			rows.add(new Row(date, txt(codeable(r.path("code"))), statusCell(r.path("status").asText(""), "completed"),
+			        txt(dateFr(date)), siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> diagnosticRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			String date = firstNonEmpty(r.path("effectiveDateTime").asText(""), r.path("issued").asText(""));
+			rows.add(new Row(date, txt(codeable(r.path("code"))), statusCell(r.path("status").asText(""), "final"),
+			        txt(dateFr(date)), siteCell(r)));
+		}
+		return rows;
+	}
+
+	private List<Row> encounterRows(List<JsonNode> resources) {
+		List<Row> rows = new ArrayList<Row>();
+		for (JsonNode r : resources) {
+			if (skipEncounter(r)) {
+				continue;
+			}
+			String date = r.path("period").path("start").asText("");
+			rows.add(new Row(date, txt(encounterType(r)), statusCell(r.path("status").asText(""), "finished"),
+			        txt(dateFr(date)), siteCell(r)));
+		}
+		return rows;
+	}
+
+	/**
+	 * Administrative noise: registration encounters, visit-container encounters (tagged
+	 * {@code encounter-tag=visit}) and untyped encounters that are not even finished carry no
+	 * clinical information — drop them.
+	 */
+	private boolean skipEncounter(JsonNode r) {
+		String type = encounterTypeText(r);
+		if (type.equalsIgnoreCase("Enregistrement de patient")) {
+			return true;
+		}
+		for (JsonNode t : r.path("meta").path("tag")) {
+			if (t.path("system").asText("").contains("encounter-tag") && t.path("code").asText("").equals("visit")) {
+				return true;
+			}
+		}
+		return type.isEmpty() && !r.path("status").asText("").equalsIgnoreCase("finished");
 	}
 
 	// --- section rendering -----------------------------------------------------------------------
 
-	private String section(String frTitle, String enTitle, Map<String, List<JsonNode>> byType, String[] types,
-	        String[] columns, Kind kind) {
-		List<JsonNode> resources = new ArrayList<JsonNode>();
-		for (String t : types) {
-			if (byType.containsKey(t)) {
-				resources.addAll(byType.get(t));
-			}
-		}
+	private String section(String frTitle, String enTitle, String[] columns, List<Row> rows) {
 		// Omit sections with no data entirely rather than rendering a header + "No data available".
-		if (resources.isEmpty()) {
+		if (rows.isEmpty()) {
 			return "";
 		}
+		// newest first, undated rows last (ISO dates compare lexicographically)
+		Collections.sort(rows, new Comparator<Row>() {
+
+			@Override
+			public int compare(Row a, Row b) {
+				if (a.sortDate.isEmpty() || b.sortDate.isEmpty()) {
+					return a.sortDate.isEmpty() ? (b.sortDate.isEmpty() ? 0 : 1) : -1;
+				}
+				return b.sortDate.compareTo(a.sortDate);
+			}
+		});
 		StringBuilder sb = new StringBuilder();
 		sb.append("<h3>").append(frTitle).append(" <span class=\"en\">/ ").append(enTitle).append("</span></h3>");
 		sb.append("<div class=\"table-wrap\"><table class=\"ips-table\"><thead><tr>");
@@ -133,9 +288,9 @@ public class IpsHtmlRenderer {
 			sb.append("<th>").append(c).append("</th>");
 		}
 		sb.append("</tr></thead><tbody>");
-		for (JsonNode r : resources) {
+		for (Row row : rows) {
 			sb.append("<tr>");
-			for (String cell : cellsFor(kind, r)) {   // cells are already HTML-ready
+			for (String cell : row.cells) {   // cells are already HTML-ready
 				sb.append("<td>").append(cell).append("</td>");
 			}
 			sb.append("</tr>");
@@ -144,72 +299,9 @@ public class IpsHtmlRenderer {
 		return sb.toString();
 	}
 
-	/** Per-type cells, mirroring the O3 ESM templates (columns + colored tags). Cells are HTML. */
-	private String[] cellsFor(Kind kind, JsonNode r) {
-		switch (kind) {
-			case ALLERGY: {
-				String crit = r.path("criticality").asText("");
-				String color = crit.equalsIgnoreCase("high") ? "red"
-				        : (!crit.isEmpty() && !crit.equalsIgnoreCase("normal")) ? "blue" : "green";
-				return new String[] { txt(categoryText(r.path("category"))),
-				        tag(crit.isEmpty() ? "Unknown" : crit, color), txt(codeable(r.path("code"))) };
-			}
-			case CONDITION: {
-				String clin = codingCode(r.path("clinicalStatus"));
-				String sev = codeable(r.path("severity"));
-				String clinColor = clin.toLowerCase().contains("active") ? "red" : "green";
-				String sevColor = sev.toLowerCase().contains("severe") ? "red" : "blue";
-				return new String[] { txt(codeable(r.path("code"))),
-				        tag(clin.isEmpty() ? "Unknown" : clin, clinColor),
-				        sev.isEmpty() ? DASH : tag(sev, sevColor), txt(categoryText(r.path("category"))) };
-			}
-			case MEDICATION: {
-				String status = r.path("status").asText("");
-				String date = firstNonEmpty(r.path("effectiveDateTime").asText(""),
-				    r.path("effectivePeriod").path("start").asText(""), r.path("authoredOn").asText(""));
-				return new String[] { txt(codeable(bestNode(r, "medicationCodeableConcept", "medication"))),
-				        txt(dosageRoute(r)), txt(dosageText(r)),
-				        status.isEmpty() ? DASH : tag(status, status.equalsIgnoreCase("active") || status.equalsIgnoreCase("completed") ? "green" : "blue"),
-				        txt(dateShort(date)) };
-			}
-			case IMMUNIZATION: {
-				String status = r.path("status").asText("");
-				return new String[] { txt(dateShort(r.path("occurrenceDateTime").asText(""))),
-				        status.isEmpty() ? DASH : tag(status, status.equalsIgnoreCase("completed") ? "green" : "blue"),
-				        txt(codeable(r.path("vaccineCode"))), txt(codeable(r.path("route"))) };
-			}
-			case OBSERVATION:
-				return new String[] { txt(codeable(r.path("code"))),
-				        txt(dateShort(firstNonEmpty(r.path("effectiveDateTime").asText(""),
-				            r.path("effectivePeriod").path("start").asText(""), r.path("issued").asText("")))),
-				        txt(observationValue(r)), txt(categoryText(r.path("category"))) };
-			case PROCEDURE: {
-				String status = r.path("status").asText("");
-				return new String[] { txt(codeable(r.path("code"))),
-				        status.isEmpty() ? DASH : tag(status, status.equalsIgnoreCase("completed") ? "green" : "blue"),
-				        txt(dateShort(firstNonEmpty(r.path("performedDateTime").asText(""),
-				            r.path("performedPeriod").path("start").asText("")))) };
-			}
-			case DIAGNOSTIC: {
-				String status = r.path("status").asText("");
-				return new String[] { txt(codeable(r.path("code"))),
-				        status.isEmpty() ? DASH : tag(status, status.equalsIgnoreCase("final") ? "green" : "blue"),
-				        txt(dateShort(firstNonEmpty(r.path("effectiveDateTime").asText(""), r.path("issued").asText("")))) };
-			}
-			case ENCOUNTER: {
-				String status = r.path("status").asText("");
-				return new String[] { txt(encounterType(r)),
-				        status.isEmpty() ? DASH : tag(status, status.equalsIgnoreCase("finished") ? "green" : "blue"),
-				        txt(dateShort(r.path("period").path("start").asText(""))) };
-			}
-			default:
-				return new String[] { DASH };
-		}
-	}
-
 	// --- patient header --------------------------------------------------------------------------
 
-	private String header(List<JsonNode> patients) {
+	private String header(List<JsonNode> patients, Set<String> sites) {
 		if (patients == null || patients.isEmpty()) {
 			return "";
 		}
@@ -226,7 +318,7 @@ public class IpsHtmlRenderer {
 			if (sub.length() > 0) {
 				sub.append(" &middot; ");
 			}
-			sub.append(esc(birth));
+			sub.append(esc(dateFr(birth)));
 		}
 		if (sub.length() > 0) {
 			sb.append("<p class=\"ips-sub\">").append(sub).append("</p>");
@@ -236,7 +328,7 @@ public class IpsHtmlRenderer {
 			sb.append("<div class=\"ips-ids\">");
 			for (JsonNode id : ids) {
 				String value = id.path("value").asText("");
-				if (value.isEmpty()) {
+				if (value.isEmpty() || isTechnicalIdentifier(id, value)) {
 					continue;
 				}
 				String label = id.path("type").path("text").asText("");
@@ -248,10 +340,56 @@ public class IpsHtmlRenderer {
 			}
 			sb.append("</div>");
 		}
+		if (!sites.isEmpty()) {
+			StringBuilder list = new StringBuilder();
+			for (String s : sites) {
+				if (list.length() > 0) {
+					list.append(", ");
+				}
+				list.append(esc(s));
+			}
+			sb.append("<p class=\"ips-sites\">Sites : ").append(list).append("</p>");
+		}
 		return sb.toString();
 	}
 
+	/** Source-keys and UUID-valued identifiers are plumbing, not clinical identity — hide them. */
+	private boolean isTechnicalIdentifier(JsonNode id, String value) {
+		if (UUID_VALUE.matcher(value).matches()) {
+			return true;
+		}
+		String typeText = id.path("type").path("text").asText("");
+		if (typeText.equalsIgnoreCase("SEDISH Source Key")) {
+			return true;
+		}
+		return id.path("system").asText("").contains("source-key");
+	}
+
 	// --- FHIR field helpers ----------------------------------------------------------------------
+
+	/** The facility of origin, from the resource's mspp-site meta tag (name, else MSPP code). */
+	private String siteOf(JsonNode r) {
+		for (JsonNode t : r.path("meta").path("tag")) {
+			if (t.path("system").asText("").contains(MSPP_SITE_TAG_SYSTEM)) {
+				String display = t.path("display").asText("");
+				return !display.isEmpty() ? display : t.path("code").asText("");
+			}
+		}
+		return "";
+	}
+
+	private String siteCell(JsonNode r) {
+		String site = siteOf(r);
+		return site.isEmpty() ? DASH : "<span class=\"ips-site\">" + esc(site) + "</span>";
+	}
+
+	/** A status pill only when it informs: the nominal status renders as an empty cell. */
+	private String statusCell(String status, String nominal) {
+		if (status.isEmpty() || status.equalsIgnoreCase(nominal)) {
+			return "";
+		}
+		return tag(status, "blue");
+	}
 
 	private String humanName(JsonNode patient) {
 		JsonNode names = patient.path("name");
@@ -305,25 +443,6 @@ public class IpsHtmlRenderer {
 		return "";
 	}
 
-	/** category may be an array of strings (AllergyIntolerance) or of CodeableConcept (Condition/Observation). */
-	private String categoryText(JsonNode cat) {
-		if (cat == null || !cat.isArray() || cat.size() == 0) {
-			return "";
-		}
-		StringBuilder sb = new StringBuilder();
-		for (JsonNode item : cat) {
-			String v = item.isTextual() ? item.asText("") : codeable(item);
-			if (v == null || v.isEmpty()) {
-				continue;
-			}
-			if (sb.length() > 0) {
-				sb.append(", ");
-			}
-			sb.append(v);
-		}
-		return sb.toString();
-	}
-
 	private String observationValue(JsonNode obs) {
 		JsonNode q = obs.path("valueQuantity");
 		if (!q.isMissingNode() && q.has("value")) {
@@ -339,6 +458,15 @@ public class IpsHtmlRenderer {
 		if (obs.has("valueBoolean")) {
 			return obs.path("valueBoolean").asText("");
 		}
+		if (obs.has("valueDateTime")) {
+			return dateFr(obs.path("valueDateTime").asText(""));
+		}
+		if (obs.has("valueDate")) {
+			return dateFr(obs.path("valueDate").asText(""));
+		}
+		if (obs.has("valueInteger")) {
+			return obs.path("valueInteger").asText("");
+		}
 		if (obs.path("component").isArray() && obs.path("component").size() > 0) {
 			StringBuilder sb = new StringBuilder();
 			for (JsonNode c : obs.path("component")) {
@@ -352,16 +480,28 @@ public class IpsHtmlRenderer {
 		return "";
 	}
 
-	private String dosageRoute(JsonNode med) {
-		JsonNode dosage = med.path("dosage");
-		if (dosage.isArray() && dosage.size() > 0) {
-			return codeable(dosage.get(0).path("route"));
+	/** The reason the medication was given (e.g. the treated condition). */
+	private String reason(JsonNode med) {
+		JsonNode reasons = med.path("reasonCode");
+		if (reasons.isArray() && reasons.size() > 0) {
+			StringBuilder sb = new StringBuilder();
+			for (JsonNode rc : reasons) {
+				String v = codeable(rc);
+				if (v.isEmpty()) {
+					continue;
+				}
+				if (sb.length() > 0) {
+					sb.append(", ");
+				}
+				sb.append(v);
+			}
+			return sb.toString();
 		}
 		return "";
 	}
 
-	/** Compact dose+frequency summary from dosage[0], best-effort. */
-	private String dosageText(JsonNode med) {
+	/** Dosage (humanized text + route when present) in one cell. */
+	private String dosageSummary(JsonNode med) {
 		JsonNode dosage = med.path("dosage");
 		if (!dosage.isArray() || dosage.size() == 0) {
 			return "";
@@ -380,23 +520,72 @@ public class IpsHtmlRenderer {
 			sb.append(repeat.path("frequency").asText("")).append("x/").append(repeat.path("period").asText(""))
 			        .append(repeat.path("periodUnit").asText(""));
 		}
-		String txt = d.path("text").asText("");
-		if (sb.length() == 0 && !txt.isEmpty()) {
-			return txt;
+		String out = sb.toString().trim();
+		if (out.isEmpty()) {
+			out = humanizeDosageText(d.path("text").asText(""));
 		}
-		return sb.toString().trim();
+		String route = codeable(d.path("route"));
+		if (!route.isEmpty()) {
+			out = out.isEmpty() ? route : out + " · " + route;
+		}
+		return out;
+	}
+
+	/**
+	 * The pipeline emits raw dosage strings like {@code 600mg | 60 day(s)}. Translate the English
+	 * duration units, space out metric units and join the parts readably; unknown formats pass
+	 * through unchanged.
+	 */
+	private String humanizeDosageText(String raw) {
+		if (raw == null || raw.trim().isEmpty()) {
+			return "";
+		}
+		String[] parts = raw.split("\\|");
+		StringBuilder sb = new StringBuilder();
+		for (String part : parts) {
+			String p = part.trim();
+			if (p.isEmpty()) {
+				continue;
+			}
+			p = p.replace("day(s)", "jour(s)").replace("week(s)", "semaine(s)").replace("month(s)", "mois")
+			        .replace("year(s)", "an(s)");
+			p = p.replaceAll("(?i)(\\d)(mg|mcg|ml|g)\\b", "$1 $2");
+			if (sb.length() > 0) {
+				sb.append(" · ");
+			}
+			sb.append(p);
+		}
+		return sb.toString();
+	}
+
+	private String encounterTypeText(JsonNode enc) {
+		JsonNode types = enc.path("type");
+		if (types.isArray() && types.size() > 0) {
+			return codeable(types.get(0));
+		}
+		return "";
 	}
 
 	private String encounterType(JsonNode enc) {
-		JsonNode types = enc.path("type");
-		if (types.isArray() && types.size() > 0) {
-			String t = codeable(types.get(0));
-			if (!t.isEmpty()) {
-				return t;
-			}
+		String t = encounterTypeText(enc);
+		if (!t.isEmpty()) {
+			return t;
 		}
-		String cls = enc.path("class").path("display").asText("");
-		return !cls.isEmpty() ? cls : enc.path("class").path("code").asText("");
+		String cls = enc.path("class").path("code").asText("");
+		if (cls.equalsIgnoreCase("AMB")) {
+			return "Ambulatoire / Ambulatory";
+		}
+		if (cls.equalsIgnoreCase("IMP")) {
+			return "Hospitalisation / Inpatient";
+		}
+		if (cls.equalsIgnoreCase("EMER")) {
+			return "Urgence / Emergency";
+		}
+		if (cls.equalsIgnoreCase("HH")) {
+			return "Domicile / Home";
+		}
+		String display = enc.path("class").path("display").asText("");
+		return !display.isEmpty() ? display : cls;
 	}
 
 	private JsonNode bestNode(JsonNode parent, String... fields) {
@@ -418,11 +607,15 @@ public class IpsHtmlRenderer {
 		return "";
 	}
 
-	private String dateShort(String d) {
+	/** ISO date(-time) -> DD/MM/YYYY; non-conforming values pass through unchanged. */
+	private String dateFr(String d) {
 		if (d == null || d.isEmpty()) {
 			return "";
 		}
-		return d.length() >= 10 ? d.substring(0, 10) : d;
+		if (d.length() >= 10 && d.charAt(4) == '-' && d.charAt(7) == '-') {
+			return d.substring(8, 10) + "/" + d.substring(5, 7) + "/" + d.substring(0, 4);
+		}
+		return d;
 	}
 
 	// --- HTML helpers ----------------------------------------------------------------------------
@@ -459,28 +652,6 @@ public class IpsHtmlRenderer {
 	}
 
 	private String styleBlock() {
-		return "<style>"
-		        + ".ips-card{background:#fff;border-radius:12px;box-shadow:0 3px 3px -4px rgba(0,0,0,.35);"
-		        + "border-top:5px solid #566a8b;padding:24px 28px;margin-top:16px;"
-		        + "font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;color:#0f172a;}"
-		        + ".ips-card h2{margin-top:0;font-size:20px;color:#0f172a;}"
-		        + ".ips-card h3{font-size:16px;color:#586674;margin:22px 0 8px;}"
-		        + ".ips-card .en{color:#8a94a6;font-weight:400;font-size:.9em;}"
-		        + ".ips-card .ips-patient{font-size:18px;font-weight:700;margin:4px 0 0;}"
-		        + ".ips-card .ips-sub{color:#586674;margin:2px 0 0;}"
-		        + ".ips-card .ips-ids{margin:10px 0 0;}"
-		        + ".ips-card .ips-ident{margin:2px 0;color:#1f3a5f;}"
-		        + ".ips-card .ips-pending{color:#9aa4b2;font-style:italic;}"
-		        + ".ips-card table.ips-table{width:100%;border-collapse:collapse;margin-top:6px;font-size:14px;}"
-		        + ".ips-card table.ips-table th{text-align:left;background:#eef3f9;color:#1f3a5f;padding:9px 10px;"
-		        + "border-bottom:2px solid #d3e0ef;font-weight:600;font-size:12.5px;}"
-		        + ".ips-card table.ips-table td{padding:9px 10px;border-bottom:1px solid #eef1f4;vertical-align:top;}"
-		        + ".ips-card table.ips-table tr:nth-child(even) td{background:#fafbfc;}"
-		        + ".ips-card .ips-tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;}"
-		        + ".ips-card .ips-tag-red{background:#ffd7d9;color:#a2191f;}"
-		        + ".ips-card .ips-tag-green{background:#a7f0ba;color:#0e6027;}"
-		        + ".ips-card .ips-tag-blue{background:#d0e2ff;color:#0043ce;}"
-		        + ".ips-card .table-wrap{overflow-x:auto;}"
-		        + "</style>";
+		return "";
 	}
 }

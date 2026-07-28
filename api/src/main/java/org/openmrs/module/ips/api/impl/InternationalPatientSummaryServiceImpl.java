@@ -15,6 +15,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
@@ -37,6 +38,8 @@ import org.openmrs.api.db.ClobDatatypeStorage;
 import org.openmrs.api.impl.BaseOpenmrsService;
 import org.openmrs.module.ips.InternationalPatientSummaryConstants;
 import org.openmrs.module.ips.api.InternationalPatientSummaryService;
+import org.openmrs.module.ips.fetch.IpsPatientMatcher;
+import org.openmrs.module.ips.fetch.SourceKey;
 import org.openmrs.module.ips.render.IpsHtmlRenderer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,28 +72,66 @@ public class InternationalPatientSummaryServiceImpl extends BaseOpenmrsService i
 
 	@Override
 	public String fetchAndStoreIps(Patient patient) throws Exception {
-		String identifier = getConfiguredIdentifier(patient);
-		if (identifier == null) {
-			log.warn("Patient {} has no '{}' identifier; cannot fetch IPS", patient.getUuid(),
-			    getIdentifierTypeSetting());
+
+		String sourceKey = buildLocalSourceKey(patient);
+		String identifier = sourceKey == null ? getConfiguredIdentifier(patient) : null;
+
+		if (sourceKey == null && identifier == null) {
+			log.warn("Patient " + patient.getUuid() + " has no source-key (GP '"
+			        + InternationalPatientSummaryConstants.MPI_MSPP_CODE + "') and no '" + getIdentifierTypeSetting()
+			        + "' identifier; cannot fetch IPS");
 			return null;
 		}
 
+		FetchOutcome outcome = doFetchAndStore(patient, sourceKey, identifier);
+		return outcome.mismatch ? null : outcome.json;
+	}
+
+	/**
+	 * Fetches from the mediator — by SEDISH source-key when the site's MSPP code is configured
+	 * (iSantePlus IDs are not nationally unique), else by iSantePlus ID — then verifies the returned
+	 * bundle really belongs to this patient before storing it. A non-matching bundle is NEVER stored.
+	 */
+	private FetchOutcome doFetchAndStore(Patient patient, String sourceKey, String identifier) throws Exception {
 		String base = administrationService.getGlobalProperty(InternationalPatientSummaryConstants.IPS_URL);
 		if (isBlank(base)) {
 			throw new IllegalStateException("Global property '" + InternationalPatientSummaryConstants.IPS_URL
 			        + "' is not set");
 		}
-		String url = stripTrailingSlash(base) + "/Patient/isanteplus/" + identifier;
+		if (sourceKey == null) {
+			log.warn("GP '" + InternationalPatientSummaryConstants.MPI_MSPP_CODE
+			        + "' is not set; falling back to the ambiguous iSantePlus-ID lookup for patient "
+			        + patient.getUuid());
+		}
+		String url = SourceKey.buildFetchUrl(base, sourceKey, identifier);
 
 		String json = httpGet(url);
 		if (isBlank(json)) {
 			log.warn("Mediator returned an empty IPS for patient {}", patient.getUuid());
-			return null;
+			return new FetchOutcome(null, false);
+		}
+
+		if (!isLocalPatient(patient, json)) {
+			log.warn("IPS returned by the mediator does NOT match patient " + patient.getUuid()
+			        + " (source-key/demographics check failed); discarding it — not stored, not shown");
+			return new FetchOutcome(null, true);
 		}
 
 		storeIps(patient, json);
-		return json;
+		return new FetchOutcome(json, false);
+	}
+
+	private static final class FetchOutcome {
+
+		final String json;
+
+		/** true when the mediator returned a bundle that belongs to ANOTHER patient. */
+		final boolean mismatch;
+
+		FetchOutcome(String json, boolean mismatch) {
+			this.json = json;
+			this.mismatch = mismatch;
+		}
 	}
 
 	@Override
@@ -113,7 +154,7 @@ public class InternationalPatientSummaryServiceImpl extends BaseOpenmrsService i
 	@Override
 	public String getOrFetchIps(Patient patient) throws Exception {
 		String stored = getStoredIps(patient);
-		if (!isBlank(stored)) {
+		if (!isBlank(stored) && isLocalPatient(patient, stored)) {
 			return stored;
 		}
 		return fetchAndStoreIps(patient);
@@ -140,23 +181,37 @@ public class InternationalPatientSummaryServiceImpl extends BaseOpenmrsService i
 		try {
 			String stored = getStoredIps(patient);
 			if (!isBlank(stored)) {
-				return renderer.render(stored);
+				if (isLocalPatient(patient, stored)) {
+					return renderer.render(stored);
+				}
+				// A copy stored before the source-key fix may belong to another patient with the
+				// same iSantePlus ID: never show it, try a fresh (verified) fetch instead.
+				log.warn("Stored IPS for patient " + patient.getUuid()
+				        + " does not match the patient; ignoring it and refetching");
 			}
-			String identifier = getConfiguredIdentifier(patient);
-			if (identifier == null) {
+
+			String sourceKey = buildLocalSourceKey(patient);
+			String identifier = sourceKey == null ? getConfiguredIdentifier(patient) : null;
+			if (sourceKey == null && identifier == null) {
 				String type = getIdentifierTypeSetting();
-				log.warn("Patient " + patient.getUuid() + " has no '" + type + "' identifier; cannot fetch IPS");
 				return renderer.renderNotice(
-				    "Ce patient n'a pas d'identifiant « " + type + " », requis pour récupérer le résumé.",
-				    "This patient has no '" + type + "' identifier, required to fetch the summary.");
+				    "Ce patient n'a pas d'identifiant « " + type + " » (et le code MSPP du site n'est pas configuré), requis pour récupérer le résumé.",
+				    "This patient has no '" + type + "' identifier (and the site's MSPP code is not configured), required to fetch the summary.");
 			}
-			String json = fetchAndStoreIps(patient);
-			if (isBlank(json)) {
+
+			FetchOutcome outcome = doFetchAndStore(patient, sourceKey, identifier);
+			if (outcome.mismatch) {
 				return renderer.renderNotice(
-				    "Aucun résumé renvoyé par le SHR pour l'identifiant " + identifier + ".",
-				    "No summary returned by the SHR for identifier " + identifier + ".");
+				    "Le résumé renvoyé par le SHR ne correspond pas à ce patient (identifiant partagé entre plusieurs sites) — affichage bloqué par sécurité.",
+				    "The summary returned by the SHR does not match this patient (identifier shared across sites) — display blocked for safety.");
 			}
-			return renderer.render(json);
+			if (isBlank(outcome.json)) {
+				String lookup = sourceKey != null ? sourceKey : identifier;
+				return renderer.renderNotice(
+				    "Aucun résumé renvoyé par le SHR pour l'identifiant " + lookup + ".",
+				    "No summary returned by the SHR for identifier " + lookup + ".");
+			}
+			return renderer.render(outcome.json);
 		}
 		catch (Exception e) {
 			log.error("Error building IPS HTML for patient " + patient.getUuid(), e);
@@ -225,6 +280,30 @@ public class InternationalPatientSummaryServiceImpl extends BaseOpenmrsService i
 			return null;
 		}
 		return conceptService.getConceptByUuid(ref);
+	}
+
+	/**
+	 * @return this patient's SEDISH source-key ({@code <mspp>-<patient_id>}), or {@code null} when
+	 *         the site's MSPP code (GP shared with mpi-client) is not configured.
+	 */
+	private String buildLocalSourceKey(Patient patient) {
+		String mspp = administrationService.getGlobalProperty(InternationalPatientSummaryConstants.MPI_MSPP_CODE);
+		return SourceKey.build(mspp, patient.getPatientId());
+	}
+
+	private String getSourceKeySystem() {
+		String system = administrationService
+		        .getGlobalProperty(InternationalPatientSummaryConstants.MPI_SOURCE_KEY_SYSTEM);
+		return isBlank(system) ? InternationalPatientSummaryConstants.DEFAULT_SOURCE_KEY_SYSTEM : system;
+	}
+
+	/** @return whether the bundle's Patient resource really is this patient (never trust a bare-ID match). */
+	private boolean isLocalPatient(Patient patient, String bundleJson) {
+		String birthDate = patient.getBirthdate() != null
+		        ? new SimpleDateFormat("yyyy-MM-dd").format(patient.getBirthdate())
+		        : null;
+		return IpsPatientMatcher.matches(bundleJson, getSourceKeySystem(), buildLocalSourceKey(patient), birthDate,
+		    patient.getFamilyName());
 	}
 
 	private String getIdentifierTypeSetting() {
@@ -321,10 +400,6 @@ public class InternationalPatientSummaryServiceImpl extends BaseOpenmrsService i
 			}
 		}
 		return sb.toString();
-	}
-
-	private String stripTrailingSlash(String s) {
-		return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
 	}
 
 	private static boolean isBlank(String s) {

@@ -40,4 +40,16 @@ public final class InternationalPatientSummaryConstants {
 	public static final String IPS_PASSWORD = "ips.password";
 
 	public static final String DEFAULT_IDENTIFIER_TYPE = "iSantePlus ID";
+
+	/**
+	 * GP shared with the mpi-client module: the site's MSPP facility code. When set, the IPS is
+	 * fetched by SEDISH source-key ({@code <mspp>-<patient_id>}) instead of the nationally
+	 * NON-unique iSantePlus ID, which can otherwise return another patient's summary.
+	 */
+	public static final String MPI_MSPP_CODE = "mpi-client.source.mspp";
+
+	/** GP shared with the mpi-client module: FHIR system of the SEDISH source-key identifier. */
+	public static final String MPI_SOURCE_KEY_SYSTEM = "mpi-client.source.keySystem";
+
+	public static final String DEFAULT_SOURCE_KEY_SYSTEM = "http://sedish-haiti.org/fhir/source-key";
 }
