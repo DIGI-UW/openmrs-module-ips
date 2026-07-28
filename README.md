@@ -25,11 +25,29 @@ To set up the IPS module, configure the following global properties in your Open
 
 | Property             | Description                                                                                                   |
 |----------------------|---------------------------------------------------------------------------------------------------------------|
-| `ips.url`            | Base URL of the IPS source that returns the consolidated IPS bundle (e.g. an SHR / OpenHIM IPS mediator). The per-patient path (`/Patient/<identifierType>/<id>`) is appended at fetch time. |
+| `ips.url`            | Base URL of the IPS source that returns the consolidated IPS bundle (e.g. an SHR / OpenHIM IPS mediator). The per-patient path is appended at fetch time (see lookup below). |
 | `ips.concept`        | UUID of the **complex** concept used to store the fetched IPS bundle.                                          |
-| `ips.identifierType` | Name **or** UUID of the patient identifier type whose value is sent to the IPS source (e.g. `iSantePlus ID`). |
+| `ips.identifierType` | Name **or** UUID of the patient identifier type whose value is sent to the IPS source (e.g. `iSantePlus ID`). Only used for the legacy fallback lookup. |
 | `ips.username`       | Basic-auth username for the IPS source / OpenHIM channel (blank = no auth header).                             |
 | `ips.password`       | Basic-auth password for the IPS source / OpenHIM channel (blank = no auth header).                            |
+| `mpi-client.source.mspp` | (shared with the mpi-client module) The site's MSPP facility code. **Set it** — it switches the lookup to the unambiguous source-key path. |
+| `mpi-client.source.keySystem` | (shared with the mpi-client module) FHIR system of the SEDISH source-key. Default `http://sedish-haiti.org/fhir/source-key`. |
+
+### Patient lookup: source-key first (wrong-patient guard)
+
+iSantePlus IDs are issued **per facility** and are NOT nationally unique — the same value can belong
+to different people at different sites, so fetching by iSantePlus ID alone can return **another
+patient's summary**. Therefore:
+
+- When `mpi-client.source.mspp` is set, the module fetches by **SEDISH source-key**
+  (`<mspp_code>-<patient_id>`, the same key the mpi-client module stamps on every record exported to
+  OpenCR): `GET <ips.url>/Patient/source-key/<mspp>-<patient_id>`. The mediator must expose this
+  route (shared-health-record ≥ the source-key patch).
+- When it is not set, the legacy `GET <ips.url>/Patient/isanteplus/<iSantePlus ID>` lookup is used.
+- In **both** cases a guard verifies the returned bundle's Patient really is the local patient
+  (source-key identifier match, else birth date + family name). A non-matching bundle is never
+  stored and never shown — the UI gets a bilingual notice instead. A previously stored bundle that
+  fails the guard is ignored and refetched.
 
 > Note: this `1.x` (legacy) branch differs from the modern module — it uses `ips.identifierType`
 > (name or UUID), not `ips.identifierType.uuid`, and adds `ips.username` / `ips.password` for a
